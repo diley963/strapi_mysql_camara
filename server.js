@@ -11,39 +11,43 @@ async function main() {
 
   const port = process.env.PORT || 1337;
   let strapiApp = null;
+  let isStrapiReady = false;
 
-  // 1. Inicializamos la instancia de Strapi 5 en memoria primero
-  try {
-    const appDir = __dirname;
-    const distDir = path.join(__dirname, 'dist');
-
-    strapiApp = await createStrapi({ 
-      appDir, 
-      distDir 
-    });
-
-    // Cargamos Strapi sin levantar un puerto independiente todavía
-    await strapiApp.load(); 
-    console.log('Instancia interna de Strapi 5 cargada con éxito.');
-
-  } catch (error) {
-    console.error('Error crítico al cargar Strapi en memoria:', error);
-    process.exit(1);
-  }
-
-  // 2. Creamos el servidor único que Hostinger controlará y escuchará
+  // 1. Creamos y levantamos el servidor HTTP INMEDIATAMENTE
   const server = http.createServer((req, res) => {
-    // Redirigimos todas las solicitudes entrantes directamente al manejador de Strapi
-    if (strapiApp && strapiApp.server && strapiApp.server.app) {
+    // Si Strapi ya cargó por completo en segundo plano, le pasamos el control
+    if (isStrapiReady && strapiApp && strapiApp.server && strapiApp.server.app) {
       return strapiApp.server.app.callback()(req, res);
     } else {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('Strapi se está inicializando, por favor refresca en unos segundos...');
+      // Mientras carga, el servidor responde con éxito para que Hostinger no tire un error
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Strapi 5 se está inicializando en Hostinger, por favor refresca en unos segundos...');
     }
   });
 
+  // LLAMADA INMEDIATA: Ejecuta listen() en menos de 10ms superando los 3 segundos de Hostinger
   server.listen(port, () => {
-    console.log(`¡Strapi 5 está completamente en línea y escuchando en el puerto ${port}!`);
+    console.log(`Servidor HTTP activo en el puerto ${port}. Cargando Strapi de fondo de inmediato...`);
+    
+    // 2. Cargamos Strapi en segundo plano de forma segura sin bloquear el inicio
+    (async () => {
+      try {
+        const appDir = __dirname;
+        const distDir = path.join(__dirname, 'dist');
+
+        strapiApp = await createStrapi({ 
+          appDir, 
+          distDir 
+        });
+
+        await strapiApp.load(); 
+        isStrapiReady = true;
+        console.log('¡Instancia de Strapi 5 cargada con éxito y lista para recibir tráfico!');
+      } catch (error) {
+        console.error('Error crítico al cargar Strapi de fondo:', error);
+        process.exit(1);
+      }
+    })();
   });
 }
 
