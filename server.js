@@ -10,39 +10,41 @@ async function main() {
   process.chdir(__dirname);
 
   const port = process.env.PORT || 1337;
+  let strapiApp = null;
 
-  // 1. Creamos el servidor puente inmediato para Hostinger
-  const dummyServer = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Strapi levantando servicios...');
-  });
-
-  // Escuchamos temporalmente para validar los 3 segundos de Hostinger
-  dummyServer.listen(port, () => {
-    console.log(`Hostinger detectó el puerto activo ${port}. Iniciando Strapi...`);
-  });
-
+  // 1. Inicializamos la instancia de Strapi 5 en memoria primero
   try {
     const appDir = __dirname;
     const distDir = path.join(__dirname, 'dist');
 
-    // 2. Inicializamos la instancia de Strapi 5
-    const app = await createStrapi({ 
+    strapiApp = await createStrapi({ 
       appDir, 
       distDir 
     });
 
-    // 3. Cerramos el servidor dummy de forma limpia antes de que Strapi tome el puerto real
-    dummyServer.close(async () => {
-      console.log('Cediendo el puerto a la instancia real de Strapi.');
-      await app.start();
-      console.log('¡Strapi 5 está completamente en línea en Hostinger!');
-    });
+    // Cargamos Strapi sin levantar un puerto independiente todavía
+    await strapiApp.load(); 
+    console.log('Instancia interna de Strapi 5 cargada con éxito.');
 
   } catch (error) {
-    console.error('Error crítico al iniciar Strapi:', error);
+    console.error('Error crítico al cargar Strapi en memoria:', error);
     process.exit(1);
   }
+
+  // 2. Creamos el servidor único que Hostinger controlará y escuchará
+  const server = http.createServer((req, res) => {
+    // Redirigimos todas las solicitudes entrantes directamente al manejador de Strapi
+    if (strapiApp && strapiApp.server && strapiApp.server.app) {
+      return strapiApp.server.app.callback()(req, res);
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('Strapi se está inicializando, por favor refresca en unos segundos...');
+    }
+  });
+
+  server.listen(port, () => {
+    console.log(`¡Strapi 5 está completamente en línea y escuchando en el puerto ${port}!`);
+  });
 }
 
 main().catch((error) => {
